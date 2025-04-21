@@ -1,108 +1,134 @@
 import streamlit as st
-import tempfile
-import joblib
-from model_utils import predict_image
-from final_integrated import calculate_combined_risk
+import cv2
+import numpy as np
+from PIL import Image
+import final_integrated  # Make sure this is the correct import
+import ascvd  # Ensure ascvd.py is available in the same directory or imported properly
 
-st.set_page_config(page_title="CVD Risk Estimator", layout="centered")
-st.title("🫠 CVD Risk Estimator from Facial Photo")
+def upload_image():
+    """Step 1: Upload and display the image."""
+    st.header("Step 1: Upload Your Image")
+    uploaded_image = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
-# --- Step 1: Upload Image ---
-st.header("📁 Step 1: Upload Image")
-uploaded_file = st.file_uploader("Upload a patient photo", type=["jpg", "jpeg", "png"])
+    if uploaded_image:
+        # Display the image
+        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+        
+        # Process the image to calculate the risk score
+        img = Image.open(uploaded_image)
+        image_array = np.array(img)
+        risk_score = final_integrated.calculate_image_based_risk(image_array)  # Call the relevant function
 
-if uploaded_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+        # Store the risk score in session state
+        st.session_state.image_risk_score = risk_score
+        st.session_state.image_uploaded = True
+        st.write(f"Image-based Risk Score: {risk_score}%")
+    else:
+        st.session_state.image_uploaded = False
+        st.warning("Please upload an image to proceed.")
 
-    st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
-    st.session_state["uploaded_image_path"] = tmp_path
-    st.session_state["image_uploaded"] = True
+def clinical_inputs():
+    """Step 2: Input clinical data (RCRI, STS)."""
+    st.header("Step 2: Input Clinical Data")
 
-# --- Step 2: Analyze Image ---
-if st.session_state.get("image_uploaded"):
-    st.markdown("---")
-    st.header("🧠 Step 2: Analyze Facial Markers")
+    # Clinical Inputs
+    age = st.number_input("Age", min_value=18, max_value=120, step=1)
+    sex = st.selectbox("Sex", ["Male", "Female"])
+    total_chol = st.number_input("Total Cholesterol (mg/dL)", min_value=100, max_value=400, step=1)
+    hdl = st.number_input("HDL Cholesterol (mg/dL)", min_value=10, max_value=100, step=1)
+    systolic_bp = st.number_input("Systolic Blood Pressure (mmHg)", min_value=80, max_value=200, step=1)
+    bp_treatment = st.selectbox("On Blood Pressure Medication?", ["Yes", "No"])
+    smoker = st.selectbox("Do you smoke?", ["Yes", "No"])
+    diabetic = st.selectbox("Do you have diabetes?", ["Yes", "No"])
+    
+    # RCRI and STS inputs
+    rcri = st.number_input("RCRI Score", min_value=0, max_value=10, step=1)
+    sts = st.number_input("STS Score", min_value=0, max_value=100, step=1)
 
-    if st.button("🔍 Run Image-Based CVD Prediction"):
-        with st.spinner("Analyzing photo..."):
-            # Load models
-            aging_classifier = joblib.load("aging_spots_classifier_model.pkl")
-            aging_scaler = joblib.load("aging_spots_classifier_model_scaler.pkl")
-            jugular_classifier = joblib.load("jugular_veins_classifier_model.pkl")
-            jugular_scaler = joblib.load("jugular_veins_classifier_model_scaler.pkl")
-            xanthelasma_classifier = joblib.load("xanthelasma_classifier_model.pkl")
-            xanthelasma_scaler = joblib.load("xanthelasma_classifier_model_scaler.pkl")
-            neck_classifier = joblib.load("neck_circumference_classifier_model.pkl")
-            neck_scaler = joblib.load("neck_circumference_classifier_model_scaler.pkl")
+    # Convert input for blood pressure treatment
+    bp_treatment = bp_treatment == "Yes"
+    smoker = smoker == "Yes"
+    diabetic = diabetic == "Yes"
 
-            # Predict each condition
-            tmp_path = st.session_state["uploaded_image_path"]
-            aging_pred = predict_image(tmp_path, aging_classifier, aging_scaler)
-            jugular_pred = predict_image(tmp_path, jugular_classifier, jugular_scaler)
-            xanthelasma_pred = predict_image(tmp_path, xanthelasma_classifier, xanthelasma_scaler)
-            neck_pred = predict_image(tmp_path, neck_classifier, neck_scaler)
+    # Store the clinical data in session state
+    st.session_state.clinical_data = {
+        "age": age,
+        "sex": sex,
+        "total_chol": total_chol,
+        "hdl": hdl,
+        "systolic_bp": systolic_bp,
+        "bp_treatment": bp_treatment,
+        "smoker": smoker,
+        "diabetic": diabetic,
+        "rcri": rcri,
+        "sts": sts
+    }
 
-            st.subheader("Image-Based Predictions")
-            st.write(f"Aging Spots: {aging_pred or 'Unable to determine'}")
-            st.write(f"Jugular Veins: {jugular_pred or 'Unable to determine'}")
-            st.write(f"Xanthelasma: {xanthelasma_pred or 'Unable to determine'}")
-            st.write(f"Neck Circumference: {neck_pred or 'Unable to determine'}")
+def calculate_risk():
+    """Step 3: Calculate and display the final CVD risk."""
+    st.header("Step 3: Calculate Final CVD Risk")
 
-            # Score the image
-            image_points = 0
-            if aging_pred and aging_pred.lower() == "positive":
-                image_points += 2
-            if jugular_pred and jugular_pred.lower() == "positive":
-                image_points += 1
-            if xanthelasma_pred and xanthelasma_pred.lower() == "positive":
-                image_points += 3
-            if neck_pred and neck_pred.lower() == "positive":
-                image_points += 2
+    if st.session_state.image_uploaded:
+        # Get image-based risk score from session state
+        image_risk_score = st.session_state.image_risk_score
+    else:
+        image_risk_score = None
 
-            st.session_state["image_score_ready"] = True
-            st.session_state["image_points"] = image_points
+    # Get clinical data from session state
+    clinical_data = st.session_state.clinical_data
+    age = clinical_data["age"]
+    sex = clinical_data["sex"]
+    total_chol = clinical_data["total_chol"]
+    hdl = clinical_data["hdl"]
+    systolic_bp = clinical_data["systolic_bp"]
+    bp_treatment = clinical_data["bp_treatment"]
+    smoker = clinical_data["smoker"]
+    diabetic = clinical_data["diabetic"]
+    rcri = clinical_data["rcri"]
+    sts = clinical_data["sts"]
 
-            st.success(f"✅ Image-Based Risk Score: {image_points}")
+    # Calculate base ASCVD risk using clinical data
+    base_ascvd_risk = ascvd.calculate_ascvd_risk(
+        age, sex, total_chol, hdl, systolic_bp, bp_treatment, smoker, diabetic, rcri, sts
+    )
+    
+    # Combine image-based risk score if available
+    if image_risk_score is not None:
+        final_risk = (base_ascvd_risk + image_risk_score) / 2
+    else:
+        final_risk = base_ascvd_risk
 
-# --- Step 3: Clinical Form and Final Risk Calculation ---
-st.markdown("---")
-st.header("📊 Step 3: Enter Clinical Info and Calculate Final Risk")
+    # Lock the final risk score into the final form
+    st.session_state.final_risk = final_risk
+    st.write(f"Final CVD Risk: {final_risk:.2f}%")
+    
+    # Final button to lock in the risk
+    if st.button("Lock Final CVD Risk"):
+        st.success("The final CVD risk has been locked.")
 
-if st.session_state.get("image_score_ready"):
-    with st.form("clinical_data_form"):
-        st.text_input("🔍 Image-Based Risk Score (from Step 2)", value=str(st.session_state.image_points), disabled=True)
+def main():
+    """Run the Streamlit app."""
+    st.title("CVD Risk Calculator")
 
-        age = st.number_input("Age", min_value=18, max_value=120, value=50)
-        gender = st.selectbox("Gender", ["Male", "Female"])
-        systolic_bp = st.number_input("Systolic Blood Pressure (mmHg)", min_value=50, max_value=250, value=120)
-        total_cholesterol = st.number_input("Total Cholesterol (mg/dL)", min_value=100, max_value=400, value=200)
-        hdl_cholesterol = st.number_input("HDL Cholesterol (mg/dL)", min_value=10, max_value=100, value=50)
-        smoker = st.checkbox("Current Smoker?")
-        diabetes = st.checkbox("Has Diabetes?")
-        history_cad = st.checkbox("History of Coronary Artery Disease?")
-        recent_mi = st.checkbox("Recent Myocardial Infarction?")
-        rcri = st.number_input("RCRI Score", min_value=0, max_value=6, value=0)
-        sts_score = st.number_input("STS Score (%)", min_value=0.0, max_value=100.0, value=1.0)
+    # Initialize session state variables
+    if "image_uploaded" not in st.session_state:
+        st.session_state.image_uploaded = False
+    if "image_risk_score" not in st.session_state:
+        st.session_state.image_risk_score = None
+    if "clinical_data" not in st.session_state:
+        st.session_state.clinical_data = {}
+    if "final_risk" not in st.session_state:
+        st.session_state.final_risk = None
 
-        submitted = st.form_submit_button("✅ Calculate Final CVD Risk")
-        if submitted:
-            image_score = st.session_state.get("image_points", 0)
-            final_risk = calculate_combined_risk(
-                age=age,
-                gender=gender,
-                systolic_bp=systolic_bp,
-                total_cholesterol=total_cholesterol,
-                hdl_cholesterol=hdl_cholesterol,
-                smoker=smoker,
-                diabetes=diabetes,
-                history_cad=history_cad,
-                recent_mi=recent_mi,
-                rcri=rcri,
-                sts_score=sts_score,
-                image_score=image_score
-            )
-            st.success(f"🧥 Final Combined CVD Risk: **{final_risk:.2f}%**")
-else:
-    st.warning("Please complete the image analysis step first to continue.")
+    # Step 1: Upload Image
+    upload_image()
+
+    # Step 2: Input Clinical Data
+    clinical_inputs()
+
+    # Step 3: Calculate Final CVD Risk
+    calculate_risk()
+
+if __name__ == "__main__":
+    main()
+
