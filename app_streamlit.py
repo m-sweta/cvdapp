@@ -1,9 +1,8 @@
 import streamlit as st
-import cv2
 import numpy as np
 from PIL import Image
-import final_integrated  # Make sure this is the correct import
-import ascvd  # Ensure ascvd.py is available in the same directory or imported properly
+import final_integrated  # Import the final_integrated.py module
+import ascvd  # Import ascvd.py for ASCVD calculation
 
 def upload_image():
     """Step 1: Upload and display the image."""
@@ -12,17 +11,23 @@ def upload_image():
 
     if uploaded_image:
         # Display the image
-        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
+        st.image(uploaded_image, caption="Uploaded Image", use_container_width=True)
         
         # Process the image to calculate the risk score
-        img = Image.open(uploaded_image)
-        image_array = np.array(img)
-        risk_score = final_integrated.calculate_image_based_risk(image_array)  # Call the relevant function
-
-        # Store the risk score in session state
-        st.session_state.image_risk_score = risk_score
-        st.session_state.image_uploaded = True
-        st.write(f"Image-based Risk Score: {risk_score}%")
+        image_path = uploaded_image.name  # Save to temporary file if necessary
+        with open(image_path, "wb") as f:
+            f.write(uploaded_image.getbuffer())
+        
+        # Call the image prediction function from final_integrated.py
+        image_risk_score = final_integrated.predict_image(image_path, classifier=None, scaler=None)  # Assuming the classifier and scaler are loaded internally
+        
+        if image_risk_score is None:
+            st.warning("Unable to determine image-based risk score.")
+        else:
+            # Store the risk score in session state
+            st.session_state.image_risk_score = image_risk_score
+            st.session_state.image_uploaded = True
+            st.write(f"Image-based Risk Score: {image_risk_score}")
     else:
         st.session_state.image_uploaded = False
         st.warning("Please upload an image to proceed.")
@@ -72,7 +77,7 @@ def calculate_risk():
         # Get image-based risk score from session state
         image_risk_score = st.session_state.image_risk_score
     else:
-        image_risk_score = None
+        image_risk_score = 0  # Default to 0 if no image uploaded
 
     # Get clinical data from session state
     clinical_data = st.session_state.clinical_data
@@ -93,12 +98,9 @@ def calculate_risk():
     )
     
     # Combine image-based risk score if available
-    if image_risk_score is not None:
-        final_risk = (base_ascvd_risk + image_risk_score) / 2
-    else:
-        final_risk = base_ascvd_risk
+    final_risk = base_ascvd_risk + image_risk_score * 2  # Arbitrary weight for image score, adjust as needed
 
-    # Lock the final risk score into the final form
+    # Store final risk in session state
     st.session_state.final_risk = final_risk
     st.write(f"Final CVD Risk: {final_risk:.2f}%")
     
@@ -114,7 +116,7 @@ def main():
     if "image_uploaded" not in st.session_state:
         st.session_state.image_uploaded = False
     if "image_risk_score" not in st.session_state:
-        st.session_state.image_risk_score = None
+        st.session_state.image_risk_score = 0
     if "clinical_data" not in st.session_state:
         st.session_state.clinical_data = {}
     if "final_risk" not in st.session_state:
