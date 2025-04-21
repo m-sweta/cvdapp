@@ -18,7 +18,7 @@ if uploaded_file is not None:
     if st.button("Run CVD Prediction"):
         with st.spinner("Analyzing photo..."):
             result = subprocess.run(
-                ["python3", "final_integrated.py", "--test_image", tmp_path],
+                ["python3", "app.py", "--test_image", tmp_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True
