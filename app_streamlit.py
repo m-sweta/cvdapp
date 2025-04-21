@@ -1,8 +1,10 @@
 import streamlit as st
 import numpy as np
+import os
 from PIL import Image
-import final_integrated  # Import the final_integrated.py module
-import ascvd  # Import ascvd.py for ASCVD calculation
+from deepface import DeepFace
+import final_integrated  # Import final_integrated.py for image-related functions
+import ascvd  # Import ascvd.py for ASCVD risk calculation
 
 def upload_image():
     """Step 1: Upload and display the image."""
@@ -11,7 +13,7 @@ def upload_image():
 
     if uploaded_image:
         # Display the image
-        st.image(uploaded_image, caption="Uploaded Image", use_container_width=True)
+        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
         
         # Process the image to calculate the risk score
         image_path = uploaded_image.name  # Save to temporary file if necessary
@@ -70,67 +72,3 @@ def clinical_inputs():
     }
 
 def calculate_risk():
-    """Step 3: Calculate and display the final CVD risk."""
-    st.header("Step 3: Calculate Final CVD Risk")
-
-    if st.session_state.image_uploaded:
-        # Get image-based risk score from session state
-        image_risk_score = st.session_state.image_risk_score
-    else:
-        image_risk_score = 0  # Default to 0 if no image uploaded
-
-    # Get clinical data from session state
-    clinical_data = st.session_state.clinical_data
-    age = clinical_data["age"]
-    sex = clinical_data["sex"]
-    total_chol = clinical_data["total_chol"]
-    hdl = clinical_data["hdl"]
-    systolic_bp = clinical_data["systolic_bp"]
-    bp_treatment = clinical_data["bp_treatment"]
-    smoker = clinical_data["smoker"]
-    diabetic = clinical_data["diabetic"]
-    rcri = clinical_data["rcri"]
-    sts = clinical_data["sts"]
-
-    # Calculate base ASCVD risk using clinical data
-    base_ascvd_risk = ascvd.calculate_ascvd_risk(
-        age, sex, total_chol, hdl, systolic_bp, bp_treatment, smoker, diabetic, rcri, sts
-    )
-    
-    # Combine image-based risk score if available
-    final_risk = base_ascvd_risk + image_risk_score * 2  # Arbitrary weight for image score, adjust as needed
-
-    # Store final risk in session state
-    st.session_state.final_risk = final_risk
-    st.write(f"Final CVD Risk: {final_risk:.2f}%")
-    
-    # Final button to lock in the risk
-    if st.button("Lock Final CVD Risk"):
-        st.success("The final CVD risk has been locked.")
-
-def main():
-    """Run the Streamlit app."""
-    st.title("CVD Risk Calculator")
-
-    # Initialize session state variables
-    if "image_uploaded" not in st.session_state:
-        st.session_state.image_uploaded = False
-    if "image_risk_score" not in st.session_state:
-        st.session_state.image_risk_score = 0
-    if "clinical_data" not in st.session_state:
-        st.session_state.clinical_data = {}
-    if "final_risk" not in st.session_state:
-        st.session_state.final_risk = None
-
-    # Step 1: Upload Image
-    upload_image()
-
-    # Step 2: Input Clinical Data
-    clinical_inputs()
-
-    # Step 3: Calculate Final CVD Risk
-    calculate_risk()
-
-if __name__ == "__main__":
-    main()
-
