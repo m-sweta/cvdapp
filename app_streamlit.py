@@ -13,7 +13,7 @@ if uploaded_file is not None:
         tmp.write(uploaded_file.getvalue())
         tmp_path = tmp.name
 
-    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
+    st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
 
     if st.button("Run CVD Prediction"):
         with st.spinner("Analyzing photo..."):
