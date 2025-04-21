@@ -2,6 +2,11 @@
 
 #python final_integrated.py --test_image ~/Desktop/CVDAPPMaster/test.png
 
+try:
+    import cv2
+except ModuleNotFoundError:
+    print("cv2 not installed")
+    
 import os
 import cv2
 import numpy as np
