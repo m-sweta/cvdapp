@@ -1,165 +1,150 @@
 import streamlit as st
-import cv2
-import numpy as np
-from PIL import Image
+import tempfile
 import joblib
-from deepface import DeepFace
-import ascvd
+from model_utils import predict_image
+from ascvd import calculate_ascvd_risk  # Ensure ascvd.py is in your project
 
-# ----------------------------
-# Helper Functions for Image Processing
-# ----------------------------
-def load_and_preprocess_image(image_path, target_size=(224, 224)):
-    """Loads an image, converts it to RGB, resizes, and ensures it has 3 channels."""
-    img = cv2.imread(image_path)
-    if img is None:
-        return None
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = cv2.resize(img, target_size)
-    if len(img.shape) == 2 or (len(img.shape) == 3 and img.shape[2] == 1):
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    return img
+st.set_page_config(page_title="CVD Risk Estimator", layout="centered")
+st.title("🫀 CVD Risk Estimator from Facial Photo and Patient Data")
 
-def extract_embedding(image):
-    """Extracts the VGG-Face embedding from an image using DeepFace."""
-    result = DeepFace.represent(img_path=image, model_name="VGG-Face", enforce_detection=False)
-    if isinstance(result, list) and len(result) > 0 and "embedding" in result[0]:
-        return result[0]["embedding"]
-    return None
+# File upload
+uploaded_file = st.file_uploader("Upload a patient photo", type=["jpg", "jpeg", "png"])
 
-def predict_image(image_path, classifier, scaler, target_size=(224, 224)):
-    """Processes an image and returns the predicted class using the provided classifier and scaler."""
-    img = load_and_preprocess_image(image_path, target_size)
-    if img is None:
-        return None
-    embedding = extract_embedding(img)
-    if embedding is None:
-        return None
-    embedding = np.array(embedding).reshape(1, -1)
-    embedding_scaled = scaler.transform(embedding)
-    prediction = classifier.predict(embedding_scaled)
-    return prediction[0]
+# Display image immediately after upload
+if uploaded_file is not None:
+    st.image(uploaded_file, caption="Uploaded Image", use_container_width=True)
 
-# ----------------------------
-# Step 1: Image Upload
-# ----------------------------
-def upload_image():
-    """Step 1: Upload the image and calculate the image-based risk score."""
-    st.header("Step 1: Upload Image")
-    uploaded_image = st.file_uploader("Upload an image (e.g., face, neck, etc.)", type=["jpg", "png", "jpeg"])
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(uploaded_file.getvalue())
+        tmp_path = tmp.name
 
-    if uploaded_image is not None:
-        st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
-        image_path = f"temp_image.{uploaded_image.name.split('.')[-1]}"
-        with open(image_path, "wb") as f:
-            f.write(uploaded_image.getbuffer())
-        
-        # Set image_uploaded flag and store image risk score in session state
-        st.session_state.image_uploaded = True
-        image_risk_score = calculate_image_risk(image_path)
-        st.session_state.image_risk_score = image_risk_score
-        st.write(f"Image-based risk score: {image_risk_score}")
-    else:
-        st.session_state.image_uploaded = False
+    with st.spinner("Analyzing photo..."):
 
-# ----------------------------
-# Step 2: Clinical Data Input
-# ----------------------------
-def enter_clinical_data():
-    """Step 2: Enter clinical data (age, cholesterol, BP, etc.)."""
-    st.header("Step 2: Enter Clinical Data")
+        # Load models
+        aging_classifier = joblib.load("aging_spots_classifier_model.pkl")
+        aging_scaler = joblib.load("aging_spots_classifier_model_scaler.pkl")
+        jugular_classifier = joblib.load("jugular_veins_classifier_model.pkl")
+        jugular_scaler = joblib.load("jugular_veins_classifier_model_scaler.pkl")
+        xanthelasma_classifier = joblib.load("xanthelasma_classifier_model.pkl")
+        xanthelasma_scaler = joblib.load("xanthelasma_classifier_model_scaler.pkl")
+        neck_classifier = joblib.load("neck_circumference_classifier_model.pkl")
+        neck_scaler = joblib.load("neck_circumference_classifier_model_scaler.pkl")
 
-    age = st.number_input("Age", min_value=0, max_value=120, value=30)
-    sex = st.selectbox("Sex", ["Male", "Female"])
-    total_chol = st.number_input("Total Cholesterol (mg/dL)", min_value=0, max_value=300, value=200)
-    hdl = st.number_input("HDL Cholesterol (mg/dL)", min_value=0, max_value=100, value=50)
-    systolic_bp = st.number_input("Systolic Blood Pressure (mm Hg)", min_value=0, max_value=250, value=120)
-    bp_treatment = st.selectbox("On blood pressure medication?", ["Yes", "No"])
-    smoker = st.selectbox("Is the patient a smoker?", ["Yes", "No"])
-    diabetic = st.selectbox("Does the patient have diabetes?", ["Yes", "No"])
+        # Image predictions
+        aging_pred = predict_image(tmp_path, aging_classifier, aging_scaler)
+        jugular_pred = predict_image(tmp_path, jugular_classifier, jugular_scaler)
+        xanthelasma_pred = predict_image(tmp_path, xanthelasma_classifier, xanthelasma_scaler)
+        neck_pred = predict_image(tmp_path, neck_classifier, neck_scaler)
 
-    rcri = st.number_input("Enter RCRI score (if available)", min_value=0, max_value=10, value=0)
-    sts = st.number_input("Enter STS score (if available)", min_value=0, max_value=10, value=0)
+        st.subheader("🔬 Image Predictions")
+        st.write(f"Aging Spots: {aging_pred or 'Unable to determine'}")
+        st.write(f"Jugular Veins: {jugular_pred or 'Unable to determine'}")
+        st.write(f"Xanthelasma: {xanthelasma_pred or 'Unable to determine'}")
+        st.write(f"Neck Circumference: {neck_pred or 'Unable to determine'}")
 
-    clinical_data = {
-        "age": age,
-        "sex": sex.lower(),
-        "total_chol": total_chol,
-        "hdl": hdl,
-        "systolic_bp": systolic_bp,
-        "bp_treatment": True if bp_treatment == "Yes" else False,
-        "smoker": True if smoker == "Yes" else False,
-        "diabetic": True if diabetic == "Yes" else False,
-        "rcri": rcri,
-        "sts": sts
-    }
+        # Risk score
+        image_points = 0
+        if aging_pred and aging_pred.lower() == "positive":
+            image_points += 2
+        if jugular_pred and jugular_pred.lower() == "positive":
+            image_points += 1
+        if xanthelasma_pred and xanthelasma_pred.lower() == "positive":
+            image_points += 3
+        if neck_pred and neck_pred.lower() == "positive":
+            image_points += 2
 
-    # Store clinical data in session state
-    st.session_state.clinical_data = clinical_data
+        st.success(f"🧠 Image-Based Risk Score: {image_points}")
 
-# ----------------------------
-# Step 3: Calculate Final CVD Risk
-# ----------------------------
-def calculate_risk():
-    """Step 3: Calculate and display the final CVD risk."""
-    st.header("Step 3: Calculate Final CVD Risk")
+# Patient inputs
+st.header("🧾 Patient Data")
 
-    if st.session_state.image_uploaded:
-        # Get image-based risk score from session state
-        image_risk_score = st.session_state.image_risk_score
-    else:
-        image_risk_score = 0  # Default to 0 if no image uploaded
+col1, col2 = st.columns(2)
 
-    # Get clinical data from session state
-    clinical_data = st.session_state.clinical_data
-    age = clinical_data["age"]
-    sex = clinical_data["sex"]
-    total_chol = clinical_data["total_chol"]
-    hdl = clinical_data["hdl"]
-    systolic_bp = clinical_data["systolic_bp"]
-    bp_treatment = clinical_data["bp_treatment"]
-    smoker = clinical_data["smoker"]
-    diabetic = clinical_data["diabetic"]
-    rcri = clinical_data["rcri"]
-    sts = clinical_data["sts"]
+with col1:
+    age = st.number_input("Age", min_value=0, max_value=120)
+    total_chol = st.number_input("Total Cholesterol (mg/dL)", min_value=0.0)
+    systolic_bp = st.number_input("Systolic BP (mm Hg)", min_value=0.0)
+    rcri = st.number_input("RCRI Score (Optional)", min_value=0.0, step=0.1)
 
-    # Calculate base ASCVD risk using clinical data from ascvd.py
-    base_ascvd_risk = ascvd.calculate_ascvd_risk(
-        age, sex, total_chol, hdl, systolic_bp, bp_treatment, smoker, diabetic, rcri, sts
-    )
-    
-    # Combine image-based risk score if available
-    final_risk = base_ascvd_risk + image_risk_score * 2  # Arbitrary weight for image score, adjust as needed
+with col2:
+    sex = st.selectbox("Sex", ["Select", "male", "female"])
+    hdl = st.number_input("HDL Cholesterol (mg/dL)", min_value=0.0)
+    bp_treatment = st.radio("On BP medication?", ["Yes", "No"])
+    smoker = st.radio("Smoker?", ["Yes", "No"])
+    diabetic = st.radio("Diabetic?", ["Yes", "No"])
+    sts = st.number_input("STS Score (Optional)", min_value=0.0, step=0.1)
 
-    # Store final risk in session state
-    st.session_state.final_risk = final_risk
-    st.write(f"Final CVD Risk: {final_risk:.2f}%")
-    
-    # Final button to lock in the risk
-    if st.button("Lock Final CVD Risk"):
-        st.success("The final CVD risk has been locked.")
+# Run button
+if uploaded_file is not None and st.button("🔍 Run CVD Prediction"):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(uploaded_file.getvalue())
+        tmp_path = tmp.name
 
-# ----------------------------
-# Main Function
-# ----------------------------
-def main():
-    """Run the Streamlit app."""
-    st.title("CVD Risk Estimator")
-    
-    if "image_uploaded" not in st.session_state:
-        st.session_state.image_uploaded = False
-    if "final_risk" not in st.session_state:
-        st.session_state.final_risk = None
+    with st.spinner("Analyzing photo..."):
 
-    # Step 1: Upload image
-    upload_image()
+        # Load models
+        aging_classifier = joblib.load("aging_spots_classifier_model.pkl")
+        aging_scaler = joblib.load("aging_spots_classifier_model_scaler.pkl")
+        jugular_classifier = joblib.load("jugular_veins_classifier_model.pkl")
+        jugular_scaler = joblib.load("jugular_veins_classifier_model_scaler.pkl")
+        xanthelasma_classifier = joblib.load("xanthelasma_classifier_model.pkl")
+        xanthelasma_scaler = joblib.load("xanthelasma_classifier_model_scaler.pkl")
+        neck_classifier = joblib.load("neck_circumference_classifier_model.pkl")
+        neck_scaler = joblib.load("neck_circumference_classifier_model_scaler.pkl")
 
-    # Step 2: Enter clinical data
-    enter_clinical_data()
+        # Image predictions
+        aging_pred = predict_image(tmp_path, aging_classifier, aging_scaler)
+        jugular_pred = predict_image(tmp_path, jugular_classifier, jugular_scaler)
+        xanthelasma_pred = predict_image(tmp_path, xanthelasma_classifier, xanthelasma_scaler)
+        neck_pred = predict_image(tmp_path, neck_classifier, neck_scaler)
 
-    # Step 3: Calculate final risk
-    calculate_risk()
+        st.subheader("🔬 Image Predictions")
+        st.write(f"Aging Spots: {aging_pred or 'Unable to determine'}")
+        st.write(f"Jugular Veins: {jugular_pred or 'Unable to determine'}")
+        st.write(f"Xanthelasma: {xanthelasma_pred or 'Unable to determine'}")
+        st.write(f"Neck Circumference: {neck_pred or 'Unable to determine'}")
 
-if __name__ == "__main__":
-    main()
+        # Risk score
+        image_points = 0
+        if aging_pred and aging_pred.lower() == "positive":
+            image_points += 2
+        if jugular_pred and jugular_pred.lower() == "positive":
+            image_points += 1
+        if xanthelasma_pred and xanthelasma_pred.lower() == "positive":
+            image_points += 3
+        if neck_pred and neck_pred.lower() == "positive":
+            image_points += 2
+
+        st.success(f"🧠 Image-Based Risk Score: {image_points}")
+
+        # Prepare inputs
+        bp_treatment_bool = bp_treatment == "Yes"
+        smoker_bool = smoker == "Yes"
+        diabetic_bool = diabetic == "Yes"
+
+        # Risk calculations
+        try:
+            ascvd_risk = calculate_ascvd_risk(
+                age, sex if sex != "Select" else None, total_chol, hdl,
+                systolic_bp, bp_treatment_bool, smoker_bool,
+                diabetic_bool, rcri if rcri > 0 else None, sts if sts > 0 else None
+            )
+        except Exception as e:
+            ascvd_risk = 0
+            st.error(f"ASCVD Risk Calculation Failed: {e}")
+
+        final_risk = ascvd_risk + image_points * 2
+
+        st.subheader("📊 Final Risk Estimate")
+        st.write(f"ASCVD 10-Year Risk: **{ascvd_risk:.2f}%**")
+        st.write(f"Final Estimated CVD Risk: **{final_risk:.2f}%**")
+
+        if final_risk <= 5:
+            st.success("Risk Category: Low Risk")
+        elif 5 < final_risk <= 7.4:
+            st.info("Risk Category: Medium-low Risk")
+        elif 7.5 <= final_risk <= 19.9:
+            st.warning("Risk Category: Medium-high Risk")
+        else:
+            st.error("Risk Category: High Risk")
 
